@@ -291,8 +291,6 @@ n >> 31后为：
 
 最终的效果就是把所有的整数映射为正整数，比如`0->0, -1->1, 1->2, -2->3`
 
-
-
 ![在这里插入图片描述](https://i-blog.csdnimg.cn/blog_migrate/a26755a995ca305a8fb0f3ced1c735a7.png)
 
 **解码时，解出正数之后再按映射关系映射回原来的负数。**  
@@ -301,8 +299,6 @@ n >> 31后为：
 sint32 = Zigzag 编码 + varints编码合起来。
 sint32 序列化：负数 -> Zigzag 编码 -> varints编码。
 sint32 反序列化：varints解码 -> Zigzag 解码 -> 负数 。
-
-
 
 ## 总结
 
@@ -313,8 +309,6 @@ sint32 反序列化：varints解码 -> Zigzag 解码 -> 负数 。
         Zigzag 编码可将负数映射为⽆符号的正数, 然后采⽤ Varints 编码进⾏数据 压缩, 在各种语⾔的 Protobuf 实现中, 对于 int32 类型的数据, Protobuf 都会转为 uint64 ⽽后 使⽤ Varints 编码来处理, 因此当字段可能为负数时, 我们应使⽤ sint32 或 sint64, 这样 Protobuf 会按照 Zigzag 编码将数据变换后再采⽤ Varints 编码进⾏压缩, 从⽽缩短数据的⼆进 制位数
 
      
-
-
 
 **问题1：为什么 Protobuf 能“知道”用 ZigZag？**
 
@@ -341,8 +335,6 @@ sint32 反序列化：varints解码 -> Zigzag 解码 -> 负数 。
 **解码时**：
 
 - 根据 `.proto` 定义的类型，决定是否执行 ZigZag 解码。
-
-
 
 **问题2：设置msb位算法**
 
@@ -374,11 +366,7 @@ public class ProtobufVarintHelper {
         }
     }
 }
-
-
 ```
-
-
 
 ```java
 输出结果：0xAC 0x02
@@ -398,14 +386,10 @@ public class ProtobufVarintHelper {
 
 3. **位移操作**：`value >>>= 7` 将数值无符号右移7位，处理下一组。
 
-
-
-
-
 **数值**：`300`  
 **二进制表示**：`100101100` → 补齐到 14 位 → `0000010 0101100`（分割为两组）
 
-##### **步骤分解：**
+##### 步骤分解：
 
 1. **分割为 7 位组**：
    

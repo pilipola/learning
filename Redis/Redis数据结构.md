@@ -81,8 +81,8 @@
 - 小 List（少量元素）
 
 - 小 ZSet（少量元素）
-
- 4️⃣ Dict（哈希表）
+  
+  4️⃣ Dict（哈希表）
 
 - Redis 的 **Hash 类型**就是基于 Dict 实现的。
 
@@ -93,8 +93,8 @@
   - `entry`：链表解决哈希冲突
   
   - 支持 **渐进式 rehash**（避免一次性扩容太耗时）
-
- 5️⃣ Intset —— 整数集合
+  
+  5️⃣ Intset —— 整数集合
 
 - 一种专门为存储整数的紧凑数组。
 
@@ -131,7 +131,7 @@
  * 保存字符串对象的结构
  */
 struct sdshdr {
-    
+
     // buf 中已占用空间的长度
     int len;
 
@@ -144,8 +144,6 @@ struct sdshdr {
 ```
 
 ![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-08-26-11-33-28-image.png)
-
-
 
 - free属性的值为0，表示这个SDS没有分配任何未使用空间。
 
@@ -187,24 +185,22 @@ struct sdshdr {
 #include <stdlib.h>
 
 int main() {
-    char original[] = "Hello,World";
-    
+    char original[] = "Hello\0World";
+
     // 创建指向原始字符串不同部分的指针
     char *first = original;
     char *second = original + 6; // 指向"World"
-    
-    // 在逗号处添加结束符来分割字符串
-    original[5] = '\0';
+
 
     strcat(first, "Kity");
-    
+
     printf("原始字符串地址: %p\n", (void*)original);
     printf("第一个字符串地址: %p\n", (void*)first);
     printf("第二个字符串地址: %p\n", (void*)second);
 
     printf("第一部分: %s\n", first);
     printf("第二部分: %s\n", second);
-    
+
     // 检查是否连续
     if (second == first + 6) {
         printf("内存是连续的\n");
@@ -212,7 +208,7 @@ int main() {
         printf("内存是不连续的\n");
         printf("地址差: %td\n", second - first);
     }
-    
+
     return 0;
 }
 ```
@@ -384,13 +380,13 @@ list结构为链表提供了表头指针head、表尾指针tail，以及链表�
  * 每个字典都使用两个哈希表，从而实现渐进式 rehash 。
  */
 typedef struct dictht {
-    
+
     // 哈希表数组
     dictEntry **table;
 
     // 哈希表大小
     unsigned long size;
-    
+
     // 哈希表大小掩码，用于计算索引值
     // 总是等于 size - 1 （因为索引计算非常频繁，所以空间换时间冗余了这个字段减少计算量）
     unsigned long sizemask;
@@ -414,7 +410,7 @@ typedef struct dictht {
  * 哈希表节点
  */
 typedef struct dictEntry {
-    
+
     // 键
     void *key;
 
@@ -469,7 +465,6 @@ type属性和privdata属性是针对不同类型的键值对，为创建多态�
 - privdata属性则保存了需要传给那些类型特定函数的可选参数。
 
 ```c
-
 /*
  * 字典类型特定函数
  */
@@ -489,7 +484,7 @@ typedef struct dictType {
 
     // 销毁键的函数
     void (*keyDestructor)(void *privdata, void *key);
-    
+
     // 销毁值的函数
     void (*valDestructor)(void *privdata, void *obj);
 
@@ -525,8 +520,8 @@ Redis 判断是否扩容主要看 **负载因子 (load factor)**：
    - 扩容门槛会提高：负载因子 ≥ **5** 才扩容。
    
    - 避免在持久化时频繁扩容影响性能。
-
- **扩容时表大小的选择**
+   
+   **扩容时表大小的选择**
 
 Redis 总是把新表的大小设为 **大于等于 2×used 的最小 2 的幂**。  
 比如：
@@ -534,8 +529,8 @@ Redis 总是把新表的大小设为 **大于等于 2×used 的最小 2 的幂**
 - 当前 `used=10`，则新表大小选择 `32`（大于等于 20 的最小 2^n）。
 
 - 如果 `used=1000`，新表大小选择 `2048`。
-
- **触发收缩的条件**
+  
+  **触发收缩的条件**
 
 收缩的规则更保守：
 
@@ -586,3 +581,433 @@ Redis 总是把新表的大小设为 **大于等于 2×used 的最小 2 的幂**
 例如：查找一个键，会在ht[0]里面进行查找，如果没找到的话，就会继续到ht[1]里面进行查找，诸如此类。
 
 另外，在渐进式rehash执行期间，新添加到字典的键值对一律会被保存到ht[1]里面，而ht[0]则不再进行任何添加操作，这一措施保证了ht[0]包含的键值对数量会只减不增，并随着rehash操作的执行而最终变成空表。
+
+### 跳跃表
+
+        跳跃表（skiplist）是一种有序数据结构，它通过在每个节点中维持多个指向其他节点的指针，从而达到快速访问节点的目的。
+
+Redis 里很多有序场景（比如 **有序集合 ZSet**）都要支持：
+
+- **快速查找**：通过多层索引可以跳跃式遍历，避免遍历所有节点。
+
+- **有序存储**：score 保证节点有序。
+
+- **支持排名操作**：span 记录每层跨越的节点数，方便计算某个节点的排名。
+
+- **易于实现**：相比平衡树，跳表的插入和删除操作更简单。
+
+![](https://ask.qcloudimg.com/http-save/yehe-5287793/c26e564ac29cc8fd8431789db4502d1c.png)
+
+> zskiplist结构
+
+- **header 节点**：跳表的入口节点，包含所有层的 forward 指针。
+
+- **level**：跳表当前最高层数。（表头节点的层数不计算在内）
+
+- **length**：跳表中节点总数。（表头节点的层数不计算在内）
+
+- **tail**：跳表尾节点，方便尾部访问。
+
+```c
+/*
+ * 跳跃表
+ */
+typedef struct zskiplist {
+
+    // 表头节点和表尾节点
+    struct zskiplistNode *header, *tail;
+
+    // 表中节点的数量
+    unsigned long length;
+
+    // 表中层数最大的节点的层数
+    int level;
+
+} zskiplist;
+```
+
+> zskiplistNode结构
+
+每个节点 (`zskiplistNode`) 通常包含：
+
+1. **score**：节点的保存分值，在跳跃表中，节点按各自所保存的分值从小到大排序。当分值大小相同，则按照成员对象的大小进行排序。
+
+2. **value**：实际存储的值。
+
+3. **backward 指针**：指向前一个节点，方便反向遍历。
+
+4. **levels 数组**：
+   
+   - 每个 level 包含两个信息：
+     
+     - **forward 指针**：指向该层的下一个节点。
+     
+     - **span**：该层到下一个节点跨越的节点数（用于排名计算）。指向NULL的所有前进指针的跨度都为0，因为他们没有连接任何节点。
+       
+       - 在查找某个节点的过程中，将沿途访问过的所有层的跨度累计起来，得到的结果就是目标节点在跳跃表中的排位。
+   
+   - 最高层的数量是随机生成的，一般 Redis 默认最多 32 层。
+
+```c
+/*
+ * 跳跃表节点
+ */
+typedef struct zskiplistNode {
+
+    // 成员对象
+    robj *obj;
+
+    // 分值
+    double score;
+
+    // 后退指针
+    struct zskiplistNode *backward;
+
+    // 层
+    struct zskiplistLevel {
+
+        // 前进指针
+        struct zskiplistNode *forward;
+
+        // 跨度
+        unsigned int span;
+
+    } level[];
+
+} zskiplistNode;
+```
+
+重点回顾：
+
+- 跳跃表是有序集合的底层实现之一。
+
+- Redis的跳跃表实现由zskiplist和zskiplistNode两个结构组成，其中zskiplist用于保存跳跃表信息（比如表头节点、表尾节点、长度），而zskiplistNode则用于表示跳跃表节点。
+
+- 每个跳跃表节点的层高都是1至32之间的随机数。
+
+- 在同一个跳跃表中，多个节点可以包含相同的分值，但每个节点的成员对象必须是唯一的。
+
+- 跳跃表中的节点按照分值大小进行排序，当分值相同时，节点按照成员对象的大小进行排序。
+
+> **Redis 跳表层高为什么是 1–32 且随机？**
+
+1. **随机保证平衡**：随机层高让节点在各层的分布符合几何概率（p=0.25），保证高层节点稀疏、低层节点密集，从而维持 O(log n) 的平均查找性能。
+
+2. **避免退化**：如果层高固定，所有节点都会出现在高层，跳表就退化成普通链表，无法加速。随机化避免了插入顺序或分布造成的不均衡。
+
+3. **范围设计合理**：最大层数设为 32 足够支持上亿个元素的有序集合，超过这个高度意义不大，反而浪费内存。
+
+4. **实现简单**：随机层高比复杂的平衡操作（如红黑树旋转）要轻量，保持了代码的高效性和易实现性。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-22-16-24-38-image.png)
+
+### 整数集合
+
+        整数集合（intset）是集合键的底层实现之一，当一个集合只包含整数值元素，并且这个集合的元素数量不多时，Redis就会使用整数集合作为集合键的底层实现。
+
+在 Redis 里，`set` 类型键可以有不同的底层实现：
+
+- 如果集合里的元素都是**整数**，而且数量不大，Redis 就用 **intset** 来存储。
+
+- 一旦元素数量增多，或者插入了非整数，就会自动升级成 **hashtable**。
+
+也就是说，`intset` 是一种**小集合的优化存储**。
+
+**整数集合的实现**
+
+整数集合(inset)是Redis用于保存整数值的集合抽象数据结构，它可以保存类型为int16_t,int32_t或者int64_t的整数值，并且保证集合中不会出现重复元素。
+
+```c
+typedef struct intset {
+    uint32_t encoding;   // 编码方式：元素的整数宽度
+    uint32_t length;     // 集合中元素的个数
+    int8_t contents[];   // 真正存储数据的数组（有序、紧凑）
+} intset;
+```
+
+- **encoding**：决定每个元素的字节数，可能是 16、32 或 64 位（`INTSET_ENC_INT16`, `INTSET_ENC_INT32`, `INTSET_ENC_INT64`）。
+
+- **length**：记录集合里有多少个元素。
+
+- **contents[]**：柔性数组，存放真正的数据。数组中的元素 **有序且不重复**。
+
+`柔性数组就是 定义在结构体最后、大小运行时决定的一块可变数组内存，常用于实现“头部+数据”的紧凑存储。`
+
+        虽然inset结构将contents属性声明为int8_t类型的数组，但实际上contents数组并不保存任何int8_t类型的值，contents数组的真正类型取决于encoding属性的值：
+
+- encoding = `INTSET_ENC_INT16`,那么contents就是一个int16_t类型的数组，数组里的每一个项都是一个int16_t类型的整数值（-32768~32767）
+
+- encoding = `INTSET_ENC_INT32`   -2^31~2^31-1
+
+- encoding = `INTSET_ENC_INT64`   -2^64~2^64-1
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-23-11-26-13-image.png)
+
+- encoding属性的值为`INTSET_ENC_INT16`，表示整数集合的底层实现为int16_t类型的数组，而集合保存的都是int16_t类型的整数值。
+
+- length属性的值为5，表示整数集合包含5个元素。
+
+- contents数组按照从小到大的顺序保存着集合的5个元素
+
+- 因为每个集合元素都是int16_t类型的整数值，所以contents数组的大小等于sizeof(int16_t) * 5 = 16 * 5 = 80
+
+---
+
+在源码里，写入元素时会用 `_intsetSet()`：
+
+```c
+static void _intsetSet(intset *is, int pos, int64_t value) {
+    if (is->encoding == INTSET_ENC_INT64) {
+        ((int64_t*)(is->contents))[pos] = value;
+    } else if (is->encoding == INTSET_ENC_INT32) {
+        ((int32_t*)(is->contents))[pos] = value;
+    } else {
+        ((int16_t*)(is->contents))[pos] = value;
+    }
+}
+```
+
+核心思路：
+
+- 把 `contents` 这段内存 **强制类型转换** 成对应的指针类型；
+
+- 再按 `pos` 下标访问，存进去。
+
+比如 `encoding = INTSET_ENC_INT32` 时：  
+`contents` 被解释为 `int32_t *`，所以每个元素就占 4 个字节。
+
+---
+
+读取时 `_intsetGet()` 也是一样：
+
+```c
+static int64_t _intsetGet(intset *is, int pos) {
+    if (is->encoding == INTSET_ENC_INT64) {
+        return ((int64_t*)(is->contents))[pos];
+    } else if (is->encoding == INTSET_ENC_INT32) {
+        return ((int32_t*)(is->contents))[pos];
+    } else {
+        return ((int16_t*)(is->contents))[pos];
+    }
+}
+```
+
+取的时候根据 `encoding` 做不同的类型转换，然后返回 `int64_t`（保证范围够大）。
+
+#### 升级
+
+        每当我们要将一个新元素添加到整数集合里面，并且新元素的类型比整数集合现有所有元素的类型都要长时，整数集合需要先进行升级(upgrade)，然后才能将新元素添加到整数集合里面。
+
+**升级的步骤**
+
+大致流程：
+
+1. 根据新元素的类型，**扩展**整数集合底层数组的**空间大小**，并为新元素**分配空间**。
+
+2. 将底层数组现有的所有元素都**转换**成与新元素相同的**类型**，并将类型转换后的元素放置到正确的位上，而且在放置元素的过程中，需要继续维持底层数组的有序性质不变。
+
+3. 将新元素添加到底层数组里面。
+
+举例：有一个`INTSET_ENC_INT16`编码的整数集合，集合中包含三个int16_t类型的元素，
+
+现将类型int32_t的整数值65535添加到整数集合里面。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-23-03-image.png)
+
+1）根据新类型的长度以及集合元素的数量（包含添加的新元素在内），对底层数组进行空间重分配。32 * 4 = 128位
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-27-06-image.png)
+
+2）转换元素类型，保存至新位置
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-29-46-image.png)
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-30-14-image.png)
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-30-37-image.png)
+
+3）将新元素添加到底层数组里面
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-30-48-image.png)
+
+4）更新状态
+
+        程序将整数集合encoding属性的值从`INTSET_ENC_INT16`改为`INTSET_ENC_INT32`，并将length属性的值从3改为4。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-24-10-38-17-image.png)
+
+重点回顾：
+
+- 整数集合是集合键的底层实现之一。
+
+- 整数集合的底层实现为数组，这个数组以有序、无重复的方式保存集合元素，程序会根据新添加的元素类型，判断是否需要进行**升级**。
+
+- 升级操作使得整数集合**操作灵活、节约内存**。
+
+- 整数集合**只支持升级，不支持降级**。
+
+### 压缩列表
+
+        压缩列表（ziplist）是列表键和哈希键的底层实现之一，Redis为了节省内存而设计的一种顺序存储结构，典型应用是：
+
+- **list 类型**的小列表（元素个数或元素长度较小）。
+
+- **hash / zset / set** 这类对象的小容器编码（当元素很少时用 ziplist 表示）。
+
+一旦数据过大，就会转成更复杂的结构（比如 quicklist / dict / skiplist）。
+
+> ziplist数据结构
+
+        一个压缩列表可以包含任意多个节点（entry），每个节点可以保存一个字节数组或者一个整数值。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-11-00-09-image.png)
+
+- **zlbytes**：整个 ziplist 占用的字节数。
+
+- **zltail**：记录压缩列表表尾节点距离压缩列表的起始地址有多少字节，通过这个偏移量，无须遍历整个列表即可确定表尾节点的地址。
+
+- **zllen**：记录包含的节点数量，当这个属性的值小于65535时，这个属性的值就是压缩列表包含节点的数量；等于65535，则需要遍历整个列表。
+
+- **entries**：若干个 entry。
+
+- **zlend**：固定值 `0xFF`，标记压缩列表结束。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-11-25-15-image.png)
+
+> **entry 的结构**
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-11-26-31-image.png)
+
+- **previous_entry_length**：
+  
+          属性以字节为单位，**记录了压缩列表中前一个节点的长度**。previous_entry_length属性的长度可以是1字节或者5字节。
+  
+  - 如果前一个 entry < 254 字节，用 1B 存储。
+  
+  - 否则用 5B，首字节设置为0xFE（十进制254），后 4 字节是长度。
+  
+          展示了一个包含1字节长的压缩列表节点，属性的值为0x05，表示前一节点的长度为5字节。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-11-39-48-image.png)
+
+        展示了一个包含5字节长的压缩节点，属性的值为0xFE00002766，其中值的最高位字节0xFE表示这是一个5字节长的previous_entry_length属性，而之后的4字节0x00002766（十进制10086）才是前一节点的实际长度。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-11-41-56-image.png)
+
+        因为节点的previous_entry_length属性记录了前一个节点的长度，所以程序可以通过指针运算，根据当前节点的起始地址来计算出前一个节点的起始地址。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-15-25-16-image.png)
+
+        压缩列表的从表尾向表头遍历操作就是使用这一原理实现的，只要我们拥有了一个指向某个节点起始地址的指针，那么通过这个指针以及这个节点的previous_entry_length属性，程序就可以一直向前一个节点回溯，最终到达压缩列表的表头节点。
+
+- **encoding**：记录了节点的content属性所保存数据的类型以及长度：
+  
+          1字节、2字节或者5字节长，值的最高位为00、01或者10的是字节数组编码：这种编码表示节点的content属性保存着字节数组，数组的长度由编码除去最高两位之后的其他位记录；
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-15-36-12-image.png)
+
+        1字节长，值的最高位以11开头的是整数编码：这种编码表示节点的content属性保存着整数值，整数值的类型和长度由编码除去最高两位之后的其他位记录；
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-15-41-25-image.png)
+
+> 表格中的下划线"__"表示留空，而b、x等变量则代表实际的二进制数据，为了方便阅读，多个字节之间用空格隔开。
+
+- **content**：负责保存节点的值，节点值可以是一个字节数组或者整数，值的类型和长度由节点的encoding属性决定。
+
+> 示例
+
+1. 编码的最高两位00表示节点保存的是一个字节数组；
+
+2. 编码的后六位001011记录了字节数组的长度11；
+
+3. content属性保存着节点的值“hello world”。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-15-44-57-image.png)
+
+1. 编码11000000表示节点保存的是一个int16_t类型的整数值；
+
+2. content属性保存着节点的值10086。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-15-45-09-image.png)
+
+#### 连锁更新
+
+前面说过，每个节点的previous_entry_length属性都记录了前一个节点的长度：
+
+- **1 字节**：前一个 entry 长度 < 254。
+
+- **5 字节**：前一个 entry 长度 ≥ 254（第一个字节固定为 254，后面 4 字节记录长度）。
+
+所以 **一个 entry 的 prevlen 大小是由前一个 entry 的长度决定的**。
+
+**触发点：前一个 entry 变长**
+
+设想一条 ziplist 里有连续的 entry，长度介于250字节到253字节之间：
+
+```css
+[A] [B] [C] [D] ...
+```
+
+- B 的 prevlen 记录的是 A 的长度。
+
+- C 的 prevlen 记录的是 B 的长度。
+
+- D 的 prevlen 记录的是 C 的长度。
+
+如果某个操作（比如插入数据）导致 **A 变大**，可能从 **253 → 300**。
+
+- 原来 B 的 prevlen 是 **1 字节**（253 < 254）。
+
+- 现在 B 的 prevlen 必须扩展为 **5 字节**（因为 300 ≥ 254）。
+
+这一步改变了 B 的总长度。
+
+**为什么会“连锁”？**
+
+B 的总长度变了，就会影响到 C：
+
+- C 的 prevlen 原来只需要 1 字节（比如 B=100 字节）。
+
+- 但由于 B 新增了 4 字节（prevlen 从 1B 变成 5B），B 的总长度可能跨过 254 的临界点。
+
+- 如果 B 的新长度 ≥ 254，那么 C 的 prevlen 也必须从 1B → 5B。
+
+接着：
+
+- C 的长度变大，又可能导致 D 的 prevlen 扩展……
+
+- 一直传递下去，直到某个 entry 的长度变化后仍然 <254，不再触发。
+
+这就是 **连锁更新**：一次扩展可能引发一连串的扩展。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-16-16-06-image.png)
+
+删除也会导致连锁更新。
+
+![](C:\Users\Administrator\AppData\Roaming\marktext\images\2025-09-25-16-16-30-image.png)
+
+连锁更新出现的根本原因是：
+
+1. **prevlen 的存储是变长的（1B/5B）**。
+
+2. **一个 entry 的总长度影响下一个 entry 的 prevlen 大小**。
+
+3. 当一个 entry 变大，可能导致下一个 entry 的 prevlen 也要扩展，从而不断传递。
+
+        因为连锁更新在最坏的情况下需要对压缩列表执行N次空间重分配操作，而每次空间重分配的最坏复杂度为O(N)，所以连锁更新的最坏复杂度为O(N的2次方)。
+
+> 为什么设计上接受这种复杂性？
+
+因为 ziplist **追求极致压缩**：
+
+- 小 entry 用 1B 存 prevlen，省内存。
+
+- 大 entry 才用 5B。
+
+尽管连锁更新的复杂度较高，但它真正造成性能问题的几率是很低的：
+
+- 压缩列表里要恰好有多个连续的、长度介于250字节至253字节之间的节点，连锁更新才有可能被引发，在实际中，这种情况并不多见。
+
+- 即使出现连锁更新，但只要被更新的节点数量不多，就不会对性能造成任何影响。
+
+所以，ziplist 只适合**短小数据结构**（比如 list/hash/zset 的小对象编码），超过一定阈值就会转成 quicklist/dict/skiplist 之类复杂结构，避免频繁连锁更新。
